@@ -207,7 +207,7 @@ func newAssignedIDListWatch(r *rest.RESTClient) *cache.ListWatch {
 }
 
 func newAssignedIDInformer(lw *cache.ListWatch) (cache.SharedInformer, error) {
-	azAssignedIDInformer := cache.NewSharedInformer(lw, &aadpodid.AzureAssignedIdentity{}, time.Minute*10)
+	azAssignedIDInformer := cache.NewSharedInformer(lw, &aadpodid.AzureAssignedIdentity{}, time.Second*2)
 	if azAssignedIDInformer == nil {
 		return nil, fmt.Errorf("could not create %s informer", aadpodid.AzureAssignedIDResource)
 	}

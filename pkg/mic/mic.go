@@ -248,7 +248,7 @@ func (c *Client) Sync(exit <-chan struct{}) {
 
 		// There is a delay in data propogation to cache. It's possible that the creates performed in the previous sync cycle
 		// are not propogated before this sync cycle began. In order to avoid redoing the cycle, we sync cache again.
-		c.CRDClient.SyncCache(exit, false)
+		//c.CRDClient.SyncCache(exit, false)
 		stats.Put(stats.CacheSync, time.Since(cacheTime))
 
 		// List all pods in all namespaces

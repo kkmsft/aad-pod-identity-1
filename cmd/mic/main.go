@@ -5,6 +5,9 @@ import (
 	"os"
 	"time"
 
+	"net/http"
+	_ "net/http/pprof"
+
 	"github.com/Azure/aad-pod-identity/pkg/mic"
 	"github.com/Azure/aad-pod-identity/pkg/probes"
 	"github.com/Azure/aad-pod-identity/version"
@@ -29,6 +32,7 @@ func main() {
 	if err != nil {
 		glog.Fatalf("Get hostname failure. Error: %+v", err)
 	}
+
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to the kube config")
 	flag.StringVar(&cloudconfig, "cloudconfig", "", "Path to cloud config e.g. Azure.json file")
 	flag.BoolVar(&forceNamespaced, "forceNamespaced", false, "Forces namespaced identities, binding, and assignment")
@@ -45,6 +49,11 @@ func main() {
 	flag.StringVar(&httpProbePort, "http-probe-port", "8080", "http liveliness probe port")
 
 	flag.Parse()
+
+	go func() {
+		glog.Info(http.ListenAndServe("localhost:6060", nil))
+	}()
+
 	if versionInfo {
 		version.PrintVersionAndExit()
 	}
