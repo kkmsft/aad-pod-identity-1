@@ -7,6 +7,8 @@ REPO_PATH="$(ORG_PATH)/$(PROJECT_NAME)"
 NMI_BINARY_NAME := nmi
 MIC_BINARY_NAME := mic
 DEMO_BINARY_NAME := demo
+SIMPLE_CMD_BINARY_NAME := simple
+GOOS ?= linux
 IDENTITY_VALIDATOR_BINARY_NAME := identityvalidator
 
 DEFAULT_VERSION := 0.0.0-dev
@@ -62,6 +64,10 @@ clean-demo:
 clean-identity-validator:
 	rm -rf bin/$(PROJECT_NAME)/$(IDENTITY_VALIDATOR_BINARY_NAME)
 
+.PHONY: clean-simple
+clean-simple:
+	rm -rf bin/$(PROJECT_NAME)/$(SIMPLE_CMD_BINARY_NAME)
+
 .PHONY: clean
 clean:
 	rm -rf bin/$(PROJECT_NAME)
@@ -74,13 +80,17 @@ build-nmi: clean-nmi
 build-mic: clean-mic
 	CGO_ENABLED=0 PKG_NAME=github.com/Azure/$(PROJECT_NAME)/cmd/$(MIC_BINARY_NAME) $(MAKE) bin/$(PROJECT_NAME)/$(MIC_BINARY_NAME)
 
+.PHONY: build-simple
+build-simple:
+	CGO_ENABLED=0 PKG_NAME=github.com/Azure/$(PROJECT_NAME)/cmd/$(SIMPLE_CMD_BINARY_NAME) $(MAKE) bin/$(PROJECT_NAME)/$(SIMPLE_CMD_BINARY_NAME)
+
 .PHONY: build-demo
 build-demo: build_tags := netgo osusergo
 build-demo: clean-demo
 	PKG_NAME=github.com/Azure/$(PROJECT_NAME)/cmd/$(DEMO_BINARY_NAME) ${MAKE} bin/$(PROJECT_NAME)/$(DEMO_BINARY_NAME)
 
 bin/%:
-	GOOS=linux GOARCH=amd64 go build $(GO_BUILD_OPTIONS) -o "$(@)" "$(PKG_NAME)"
+	GOOS=$(GOOS) GOARCH=amd64 go build $(GO_BUILD_OPTIONS) -o "$(@)" "$(PKG_NAME)"
 
 .PHONY: build-identity-validator
 build-identity-validator: clean-identity-validator
