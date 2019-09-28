@@ -9,6 +9,7 @@ MIC_BINARY_NAME := mic
 DEMO_BINARY_NAME := demo
 SIMPLE_CMD_BINARY_NAME := simple
 GOOS ?= linux
+TEST_GOOS ?= darwin
 IDENTITY_VALIDATOR_BINARY_NAME := identityvalidator
 
 DEFAULT_VERSION := 0.0.0-dev
@@ -147,11 +148,11 @@ push: push-nmi push-mic push-demo push-identity-validator
 
 .PHONY: e2e
 e2e:
-	go test github.com/Azure/$(PROJECT_NAME)/test/e2e $(E2E_TEST_OPTIONS)
+	GOOS=$(TEST_GOOS) go test github.com/Azure/$(PROJECT_NAME)/test/e2e $(E2E_TEST_OPTIONS)
 
 .PHONY: unit-test
 unit-test:
-	go test -race -count=1 $(shell go list ./... | grep -v /test/e2e) -v
+	GOOS=$(TEST_GOOS) go test -race -count=1 $(shell go list ./... | grep -v /test/e2e) -v
 
 .PHONY: validate-version
 validate-version: validate-version-NMI validate-version-MIC validate-version-IDENTITY_VALIDATOR validate-version-DEMO
