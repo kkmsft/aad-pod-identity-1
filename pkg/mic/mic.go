@@ -1,6 +1,7 @@
 package mic
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -136,16 +137,20 @@ func NewMICClient(cloudconfig string, config *rest.Config, isNamespaced bool, sy
 // Run - Initiates the leader election run call to find if its leader and run it
 func (c *Client) Run() {
 	glog.Infof("Initiating MIC Leader election")
-	c.leaderElector.Run()
+	c.leaderElector.Run(context.Background())
 }
 
 // NewLeaderElector - does the required leader election initialization
 func (c *Client) NewLeaderElector(clientSet *kubernetes.Clientset, recorder record.EventRecorder, leaderElectionConfig *LeaderElectionConfig) (leaderElector *leaderelection.LeaderElector, err error) {
 	c.LeaderElectionConfig = leaderElectionConfig
+	// TODO: Move this exit channel to right place and use
+	// context from leader election.
+	var exit <-chan struct{}
 	resourceLock, err := resourcelock.New(resourcelock.EndpointsResourceLock,
 		c.Namespace,
 		c.Name,
 		clientSet.CoreV1(),
+		clientSet.CoordinationV1(),
 		resourcelock.ResourceLockConfig{
 			Identity:      c.Instance,
 			EventRecorder: recorder})
@@ -158,7 +163,7 @@ func (c *Client) NewLeaderElector(clientSet *kubernetes.Clientset, recorder reco
 		RenewDeadline: c.Duration / 2,
 		RetryPeriod:   c.Duration / 4,
 		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(exit <-chan struct{}) {
+			OnStartedLeading: func(ctx context.Context) {
 				c.Start(exit)
 			},
 			OnStoppedLeading: func() {
@@ -248,7 +253,7 @@ func (c *Client) Sync(exit <-chan struct{}) {
 
 		// There is a delay in data propogation to cache. It's possible that the creates performed in the previous sync cycle
 		// are not propogated before this sync cycle began. In order to avoid redoing the cycle, we sync cache again.
-		c.CRDClient.SyncCache(exit, false)
+		c.CRDClient.SyncCache(exit)
 		stats.Put(stats.CacheSync, time.Since(cacheTime))
 
 		// List all pods in all namespaces

@@ -127,27 +127,27 @@ const (
 type AzureIdentitySpec struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	// UserAssignedMSI or Service Principal
-	Type IdentityType `json:"type"`
+	Type IdentityType `json:"Type"`
 
 	// User assigned MSI resource id.
-	ResourceID string `json:"resourceid"`
+	ResourceID string `json:"ResourceID"`
 	//Both User Assigned MSI and SP can use this field.
-	ClientID string `json:"clientid"`
+	ClientID string `json:"ClientID"`
 
 	//Used for service principal
-	ClientPassword api.SecretReference `json:"clientpassword"`
+	ClientPassword api.SecretReference `json:"ClientPassword"`
 	// Service principal tenant id.
-	TenantID string `json:"tenantid"`
+	TenantID string `json:"TenantID"`
 	// For service principal. Option param for specifying the  AD details.
-	ADResourceID string `json:"adresourceid"`
-	ADEndpoint   string `json:"adendpoint"`
+	ADResourceID string `json:"ADResourceid"`
+	ADEndpoint   string `json:"ADEndpoint"`
 
-	Replicas *int32 `json:"replicas"`
+	Replicas *int32 `json:"Replicas"`
 }
 
 type AzureIdentityStatus struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	AvailableReplicas int32 `json:"availableReplicas"`
+	AvailableReplicas int32 `json:"AvailableReplicas"`
 }
 
 /*** AzureIdentityBinding ***/
@@ -181,15 +181,15 @@ const (
 // and the identities present..
 type AzureIdentityBindingSpec struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	AzureIdentity     string `json:"azureidentity"`
-	Selector          string `json:"selector"`
+	AzureIdentity     string `json:"AzureIdentity"`
+	Selector          string `json:"Selector"`
 	// Weight is used to figure out which of the matching identities would be selected.
-	Weight int `json:"weight"`
+	Weight int `json:"Weight"`
 }
 
 type AzureIdentityBindingStatus struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	AvailableReplicas int32 `json:"availableReplicas"`
+	AvailableReplicas int32 `json:"AvailableReplicas"`
 }
 
 /*** AzureAssignedIdentitySpec ***/
@@ -197,20 +197,20 @@ type AzureIdentityBindingStatus struct {
 //AzureAssignedIdentitySpec has the contents of Azure identity<->POD
 type AzureAssignedIdentitySpec struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	AzureIdentityRef  *AzureIdentity        `json:"azureidentityref"`
-	AzureBindingRef   *AzureIdentityBinding `json:"azurebindingref"`
-	Pod               string                `json:"pod"`
-	PodNamespace      string                `json:"podnamespace"`
-	NodeName          string                `json:"nodename"`
+	AzureIdentityRef  *AzureIdentity        `json:"AzureIdentityRef"`
+	AzureBindingRef   *AzureIdentityBinding `json:"AzureBindingRef"`
+	Pod               string                `json:"Pod"`
+	PodNamespace      string                `json:"PodNamespace"`
+	NodeName          string                `json:"NodeName"`
 
-	Replicas *int32 `json:"replicas"`
+	Replicas *int32 `json:"Replicas"`
 }
 
 // AzureAssignedIdentityStatus has the replica status of the resouce.
 type AzureAssignedIdentityStatus struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	Status            string `json:"status"`
-	AvailableReplicas int32  `json:"availableReplicas"`
+	AvailableReplicas int32  `json:"AvailableReplicas"`
 }
 
 // AzurePodIdentityExceptionSpec matches pods with the selector defined.
@@ -218,11 +218,11 @@ type AzureAssignedIdentityStatus struct {
 // proxy the request and send response back without any validation.
 type AzurePodIdentityExceptionSpec struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	PodLabels         map[string]string `json:"podLabels"`
+	PodLabels         map[string]string `json:"PodLabels"`
 }
 
 // AzurePodIdentityExceptionStatus ...
 type AzurePodIdentityExceptionStatus struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Status            string `json:"status"`
+	Status            string `json:"Status"`
 }
