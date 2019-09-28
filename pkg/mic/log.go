@@ -13,7 +13,7 @@ func (l Log) Info(msg string) {
 
 // Infof - log the messages to be info messages and formatted.
 func (l Log) Infof(format string, args ...interface{}) {
-	glog.Infof(format, args)
+	glog.Infof(format, args...)
 }
 
 // Errorf - log the messages to be error messages and formatted.
