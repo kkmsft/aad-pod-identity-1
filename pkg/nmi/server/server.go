@@ -22,8 +22,8 @@ import (
 	k8s "github.com/Azure/aad-pod-identity/pkg/k8s"
 	iptables "github.com/Azure/aad-pod-identity/pkg/nmi/iptables"
 	"github.com/Azure/aad-pod-identity/pkg/pod"
-	"github.com/Azure/go-autorest/autorest/adal"
 	utils "github.com/Azure/aad-pod-identity/pkg/utils"
+	"github.com/Azure/go-autorest/autorest/adal"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -276,7 +276,7 @@ func (s *Server) getTokenForExceptedPod(logger *log.Entry, rqClientID, rqResourc
 		logger.Infof("Fetching token for system assigned MSI")
 		token, err = auth.GetServicePrincipalTokenFromMSI(rqResource)
 	} else { // User assigned identity usage.
-		logger.Infof("Fetching token for user assigned MSI for id: %s", rqResource)
+		logger.Infof("Fetching token for user assigned MSI")
 		token, err = auth.GetServicePrincipalTokenFromMSIWithUserAssignedID(rqClientID, rqResource)
 	}
 	if err != nil {
