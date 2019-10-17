@@ -62,6 +62,7 @@ type Client struct {
 	syncRetryInterval   time.Duration
 	enableScaleFeatures bool
 	createDeleteBatch   int64
+	skipCloudOps        bool
 
 	syncing int32 // protect against conucrrent sync's
 
@@ -85,7 +86,7 @@ type trackUserAssignedMSIIds struct {
 
 // NewMICClient returnes new mic client
 func NewMICClient(cloudconfig string, config *rest.Config, isNamespaced bool, syncRetryInterval time.Duration,
-	leaderElectionConfig *LeaderElectionConfig, enableScaleFeatures bool, createDeleteBatch int64) (*Client, error) {
+	leaderElectionConfig *LeaderElectionConfig, enableScaleFeatures bool, createDeleteBatch int64, skipCloudOps bool) (*Client, error) {
 	glog.Infof("Starting to create the pod identity client. Version: %v. Build date: %v", version.MICVersion, version.BuildDate)
 
 	clientSet := kubernetes.NewForConfigOrDie(config)
@@ -97,10 +98,14 @@ func NewMICClient(cloudconfig string, config *rest.Config, isNamespaced bool, sy
 
 	informer := informers.NewSharedInformerFactory(clientSet, 30*time.Second)
 
-	cloudClient, err := cloudprovider.NewCloudProvider(cloudconfig)
-	if err != nil {
-		return nil, err
+	var cloudClient *cloudprovider.Client
+	if skipCloudOps {
+		cloudClient, err = cloudprovider.NewCloudProvider(cloudconfig)
+		if err != nil {
+			return nil, err
+		}
 	}
+
 	glog.V(1).Infof("Cloud provider initialized")
 
 	eventCh := make(chan aadpodid.EventType, 100)
@@ -128,6 +133,7 @@ func NewMICClient(cloudconfig string, config *rest.Config, isNamespaced bool, sy
 		syncRetryInterval:   syncRetryInterval,
 		enableScaleFeatures: enableScaleFeatures,
 		createDeleteBatch:   createDeleteBatch,
+		skipCloudOps:        skipCloudOps,
 	}
 	leaderElector, err := c.NewLeaderElector(clientSet, recorder, leaderElectionConfig)
 	if err != nil {
@@ -794,83 +800,84 @@ func (c *Client) updateUserMSI(newAssignedIDs map[string]aadpodid.AzureAssignedI
 	addUserAssignedMSIIDs := c.getUniqueIDs(nodeTrackList.addUserAssignedMSIIDs)
 	removeUserAssignedMSIIDs := c.getUniqueIDs(nodeTrackList.removeUserAssignedMSIIDs)
 
-	err := c.CloudClient.UpdateUserMSI(addUserAssignedMSIIDs, removeUserAssignedMSIIDs, nodeOrVMSSName, nodeTrackList.isvmss)
-	if err != nil {
-		glog.Errorf("Updating msis on node %s, add [%d], del [%d] failed with error %v", nodeOrVMSSName, len(nodeTrackList.assignedIDsToCreate), len(nodeTrackList.assignedIDsToDelete), err)
-		idList, getErr := c.getUserMSIListForNode(nodeOrVMSSName, nodeTrackList.isvmss)
-		if getErr != nil {
-			glog.Errorf("Getting list of msis from node %s resulted in error %v", nodeOrVMSSName, getErr)
+	if !c.skipCloudOps {
+		err := c.CloudClient.UpdateUserMSI(addUserAssignedMSIIDs, removeUserAssignedMSIIDs, nodeOrVMSSName, nodeTrackList.isvmss)
+		if err != nil {
+			glog.Errorf("Updating msis on node %s, add [%d], del [%d] failed with error %v", nodeOrVMSSName, len(nodeTrackList.assignedIDsToCreate), len(nodeTrackList.assignedIDsToDelete), err)
+			idList, getErr := c.getUserMSIListForNode(nodeOrVMSSName, nodeTrackList.isvmss)
+			if getErr != nil {
+				glog.Errorf("Getting list of msis from node %s resulted in error %v", nodeOrVMSSName, getErr)
+				return
+			}
+
+			for _, createID := range nodeTrackList.assignedIDsToCreate {
+				id := createID.Spec.AzureIdentityRef
+				binding := createID.Spec.AzureBindingRef
+
+				isUserAssignedMSI := c.checkIfUserAssignedMSI(id)
+				idExistsOnNode := c.checkIfMSIExistsOnNode(id, createID.Spec.NodeName, idList)
+
+				if isUserAssignedMSI && !idExistsOnNode {
+					message := fmt.Sprintf("Applying binding %s node %s for pod %s resulted in error %v", binding.Name, createID.Spec.NodeName, createID.Name, err.Error())
+					c.EventRecorder.Event(binding, corev1.EventTypeWarning, "binding apply error", message)
+					glog.Error(message)
+					continue
+				}
+				// the identity was successfully assigned to the node
+				c.EventRecorder.Event(binding, corev1.EventTypeNormal, "binding applied",
+					fmt.Sprintf("Binding %s applied on node %s for pod %s", binding.Name, createID.Spec.NodeName, createID.Name))
+
+				glog.Infof("Updating msis on node %s failed, but identity %s has successfully been assigned to node", createID.Spec.NodeName, binding.Name)
+
+				// Identity is successfully assigned to node, so update the status of assigned identity to assigned
+				if updateErr := c.updateAssignedIdentityStatus(&createID, aadpodid.AssignedIDAssigned); updateErr != nil {
+					message := fmt.Sprintf("Updating assigned identity %s status to %s for pod %s failed with error %v", createID.Name, aadpodid.AssignedIDAssigned, createID.Spec.Pod, updateErr.Error())
+					c.EventRecorder.Event(&createID, corev1.EventTypeWarning, "status update error", message)
+					glog.Error(message)
+				}
+			}
+
+			for _, delID := range nodeTrackList.assignedIDsToDelete {
+				id := delID.Spec.AzureIdentityRef
+				removedBinding := delID.Spec.AzureBindingRef
+				isUserAssignedMSI := c.checkIfUserAssignedMSI(id)
+				idExistsOnNode := c.checkIfMSIExistsOnNode(id, delID.Spec.NodeName, idList)
+				vmssGroups, getErr := getVMSSGroups(c.NodeClient, nodeRefs)
+				if getErr != nil {
+					glog.Error(getErr)
+					continue
+				}
+				inUse, checkErr := c.checkIfInUse(delID, newAssignedIDs, vmssGroups)
+				if checkErr != nil {
+					glog.Error(checkErr)
+					continue
+				}
+				// the identity still exists on node, which means removing the identity from the node failed
+				if isUserAssignedMSI && !inUse && idExistsOnNode {
+					message := fmt.Sprintf("Binding %s removal from node %s for pod %s resulted in error %v", removedBinding.Name, delID.Spec.NodeName, delID.Spec.Pod, err.Error())
+					c.EventRecorder.Event(removedBinding, corev1.EventTypeWarning, "binding remove error", message)
+					glog.Error(message)
+					continue
+				}
+
+				glog.Infof("Updating msis on node %s failed, but identity %s has successfully been removed from node", delID.Spec.NodeName, removedBinding.Name)
+
+				// remove assigned identity crd from cluster as the identity has successfully been removed from the node
+				err = c.removeAssignedIdentity(&delID)
+				if err != nil {
+					c.EventRecorder.Event(removedBinding, corev1.EventTypeWarning, "binding remove error",
+						fmt.Sprintf("Removing assigned identity binding %s node %s for pod %s resulted in error %v", removedBinding.Name, delID.Spec.NodeName, delID.Name, err.Error()))
+					glog.Error(err)
+					continue
+				}
+				// the identity was successfully removed from node
+				c.EventRecorder.Event(removedBinding, corev1.EventTypeNormal, "binding removed",
+					fmt.Sprintf("Binding %s removed from node %s for pod %s", removedBinding.Name, delID.Spec.NodeName, delID.Spec.Pod))
+			}
+			stats.Put(stats.TotalCreateOrUpdate, time.Since(beginAdding))
 			return
 		}
-
-		for _, createID := range nodeTrackList.assignedIDsToCreate {
-			id := createID.Spec.AzureIdentityRef
-			binding := createID.Spec.AzureBindingRef
-
-			isUserAssignedMSI := c.checkIfUserAssignedMSI(id)
-			idExistsOnNode := c.checkIfMSIExistsOnNode(id, createID.Spec.NodeName, idList)
-
-			if isUserAssignedMSI && !idExistsOnNode {
-				message := fmt.Sprintf("Applying binding %s node %s for pod %s resulted in error %v", binding.Name, createID.Spec.NodeName, createID.Name, err.Error())
-				c.EventRecorder.Event(binding, corev1.EventTypeWarning, "binding apply error", message)
-				glog.Error(message)
-				continue
-			}
-			// the identity was successfully assigned to the node
-			c.EventRecorder.Event(binding, corev1.EventTypeNormal, "binding applied",
-				fmt.Sprintf("Binding %s applied on node %s for pod %s", binding.Name, createID.Spec.NodeName, createID.Name))
-
-			glog.Infof("Updating msis on node %s failed, but identity %s has successfully been assigned to node", createID.Spec.NodeName, binding.Name)
-
-			// Identity is successfully assigned to node, so update the status of assigned identity to assigned
-			if updateErr := c.updateAssignedIdentityStatus(&createID, aadpodid.AssignedIDAssigned); updateErr != nil {
-				message := fmt.Sprintf("Updating assigned identity %s status to %s for pod %s failed with error %v", createID.Name, aadpodid.AssignedIDAssigned, createID.Spec.Pod, updateErr.Error())
-				c.EventRecorder.Event(&createID, corev1.EventTypeWarning, "status update error", message)
-				glog.Error(message)
-			}
-		}
-
-		for _, delID := range nodeTrackList.assignedIDsToDelete {
-			id := delID.Spec.AzureIdentityRef
-			removedBinding := delID.Spec.AzureBindingRef
-			isUserAssignedMSI := c.checkIfUserAssignedMSI(id)
-			idExistsOnNode := c.checkIfMSIExistsOnNode(id, delID.Spec.NodeName, idList)
-			vmssGroups, getErr := getVMSSGroups(c.NodeClient, nodeRefs)
-			if getErr != nil {
-				glog.Error(getErr)
-				continue
-			}
-			inUse, checkErr := c.checkIfInUse(delID, newAssignedIDs, vmssGroups)
-			if checkErr != nil {
-				glog.Error(checkErr)
-				continue
-			}
-			// the identity still exists on node, which means removing the identity from the node failed
-			if isUserAssignedMSI && !inUse && idExistsOnNode {
-				message := fmt.Sprintf("Binding %s removal from node %s for pod %s resulted in error %v", removedBinding.Name, delID.Spec.NodeName, delID.Spec.Pod, err.Error())
-				c.EventRecorder.Event(removedBinding, corev1.EventTypeWarning, "binding remove error", message)
-				glog.Error(message)
-				continue
-			}
-
-			glog.Infof("Updating msis on node %s failed, but identity %s has successfully been removed from node", delID.Spec.NodeName, removedBinding.Name)
-
-			// remove assigned identity crd from cluster as the identity has successfully been removed from the node
-			err = c.removeAssignedIdentity(&delID)
-			if err != nil {
-				c.EventRecorder.Event(removedBinding, corev1.EventTypeWarning, "binding remove error",
-					fmt.Sprintf("Removing assigned identity binding %s node %s for pod %s resulted in error %v", removedBinding.Name, delID.Spec.NodeName, delID.Name, err.Error()))
-				glog.Error(err)
-				continue
-			}
-			// the identity was successfully removed from node
-			c.EventRecorder.Event(removedBinding, corev1.EventTypeNormal, "binding removed",
-				fmt.Sprintf("Binding %s removed from node %s for pod %s", removedBinding.Name, delID.Spec.NodeName, delID.Spec.Pod))
-		}
-		stats.Put(stats.TotalCreateOrUpdate, time.Since(beginAdding))
-		return
 	}
-
 	semUpdate := semaphore.NewWeighted(c.createDeleteBatch)
 
 	for _, createID := range nodeTrackList.assignedIDsToCreate {

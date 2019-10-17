@@ -27,6 +27,7 @@ var (
 	enableScaleFeatures bool
 	createDeleteBatch   int64
 	clientQPS           float64
+	skipCloudOps        bool
 )
 
 func main() {
@@ -61,6 +62,9 @@ func main() {
 
 	// Client QPS is used to configure the client-go QPS throttling and bursting.
 	flag.Float64Var(&clientQPS, "clientQps", 5, "Client QPS used for throttling of calls to kube-api server")
+
+	// Skip cloud operations
+	flag.BoolVar(&skipCloudOps, "skipCloudOps", false, "Skip all cloud operations")
 
 	flag.Parse()
 	if versionInfo {
@@ -98,7 +102,7 @@ func main() {
 	config.Burst = int(clientQPS)
 	glog.Infof("Client QPS set to: %v. Burst to: %v", config.QPS, config.Burst)
 
-	micClient, err := mic.NewMICClient(cloudconfig, config, forceNamespaced, syncRetryDuration, &leaderElectionCfg, enableScaleFeatures, createDeleteBatch)
+	micClient, err := mic.NewMICClient(cloudconfig, config, forceNamespaced, syncRetryDuration, &leaderElectionCfg, enableScaleFeatures, createDeleteBatch, skipCloudOps)
 	if err != nil {
 		glog.Fatalf("Could not get the MIC client: %+v", err)
 	}
