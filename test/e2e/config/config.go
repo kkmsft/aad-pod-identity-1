@@ -1,6 +1,10 @@
 package config
 
-import "github.com/kelseyhightower/envconfig"
+import (
+	"strings"
+
+	"github.com/kelseyhightower/envconfig"
+)
 
 // Config holds global test configuration translated from environment variables
 type Config struct {
@@ -10,11 +14,13 @@ type Config struct {
 	KeyvaultName             string `envconfig:"KEYVAULT_NAME"`
 	KeyvaultSecretName       string `envconfig:"KEYVAULT_SECRET_NAME"`
 	KeyvaultSecretVersion    string `envconfig:"KEYVAULT_SECRET_VERSION"`
-	MICVersion               string `envconfig:"MIC_VERSION" default:"1.5.2"`
-	NMIVersion               string `envconfig:"NMI_VERSION" default:"1.5.2"`
+	MICVersion               string `envconfig:"MIC_VERSION" default:"1.5.4"`
+	NMIVersion               string `envconfig:"NMI_VERSION" default:"1.5.4"`
 	Registry                 string `envconfig:"REGISTRY" default:"mcr.microsoft.com/k8s/aad-pod-identity"`
-	IdentityValidatorVersion string `envconfig:"IDENTITY_VALIDATOR_VERSION" default:"1.5.2"`
+	IdentityValidatorVersion string `envconfig:"IDENTITY_VALIDATOR_VERSION" default:"1.5.4"`
 	SystemMSICluster         bool   `envconfig:"SYSTEM_MSI_CLUSTER" default:"false"`
+	EnableScaleFeatures      bool   `envconfig:"ENABLE_SCALE_FEATURES" default:"false"`
+	ImmutableUserMSIs        string `envconfig:"IMMUTABLE_IDENTITY_CLIENT_ID"`
 }
 
 // ParseConfig will parse needed environment variables for running the tests
@@ -23,6 +29,6 @@ func ParseConfig() (*Config, error) {
 	if err := envconfig.Process("config", c); err != nil {
 		return nil, err
 	}
-
+	c.ResourceGroup = strings.ToLower(c.ResourceGroup)
 	return c, nil
 }

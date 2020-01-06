@@ -1,14 +1,19 @@
 package main
 
 import (
+	goflag "flag"
 	"os"
 
+	"net/http"
+	_ "net/http/pprof"
+
 	"github.com/Azure/aad-pod-identity/pkg/k8s"
+	"github.com/Azure/aad-pod-identity/pkg/metrics"
 	server "github.com/Azure/aad-pod-identity/pkg/nmi/server"
 	"github.com/Azure/aad-pod-identity/pkg/probes"
 	"github.com/Azure/aad-pod-identity/version"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
+	"k8s.io/klog"
 )
 
 const (
@@ -22,7 +27,7 @@ const (
 )
 
 var (
-	debug                              = pflag.Bool("debug", true, "sets log to debug level")
+	debug                              = pflag.Bool("debug", false, "sets log to debug level")
 	versionInfo                        = pflag.Bool("version", false, "prints the version information")
 	nmiPort                            = pflag.String("nmi-port", defaultNmiPort, "NMI application port")
 	metadataIP                         = pflag.String("metadata-ip", defaultMetadataIP, "instance metadata host ip")
@@ -36,27 +41,42 @@ var (
 	retryAttemptsForCreated            = pflag.Int("retry-attempts-for-created", defaultlistPodIDsRetryAttemptsForCreated, "Number of retries in NMI to find assigned identity in CREATED state")
 	retryAttemptsForAssigned           = pflag.Int("retry-attempts-for-assigned", defaultlistPodIDsRetryAttemptsForAssigned, "Number of retries in NMI to find assigned identity in ASSIGNED state")
 	findIdentityRetryIntervalInSeconds = pflag.Int("find-identity-retry-interval", defaultlistPodIDsRetryIntervalInSeconds, "Retry interval to find assigned identities in seconds")
+	enableProfile                      = pflag.Bool("enableProfile", false, "Enable/Disable pprof profiling")
+	enableScaleFeatures                = pflag.Bool("enableScaleFeatures", false, "Enable/Disable features for scale clusters")
+	blockInstanceMetadata              = pflag.Bool("block-instance-metadata", false, "Block instance metadata endpoints")
+	prometheusPort                     = pflag.String("prometheus-port", "9090", "Prometheus port for metrics")
 )
 
 func main() {
+	// this is done for glog used by client-go underneath
+	pflag.CommandLine.AddGoFlagSet(goflag.CommandLine)
+
 	pflag.Parse()
 	if *versionInfo {
 		version.PrintVersionAndExit()
 	}
-	if *debug {
-		log.SetLevel(log.DebugLevel)
-	}
-	log.Infof("Starting nmi process. Version: %v. Build date: %v", version.NMIVersion, version.BuildDate)
-	logger := &server.Log{}
 
-	client, err := k8s.NewKubeClient(logger)
+	klog.Infof("Starting nmi process. Version: %v. Build date: %v.", version.NMIVersion, version.BuildDate)
+
+	if *enableProfile {
+		profilePort := "6060"
+		klog.Infof("Starting profiling on port %s", profilePort)
+		go func() {
+			klog.Error(http.ListenAndServe("localhost:"+profilePort, nil))
+		}()
+	}
+	if *enableScaleFeatures {
+		klog.Infof("Features for scale clusters enabled")
+	}
+
+	client, err := k8s.NewKubeClient(*nodename, *enableScaleFeatures)
 	if err != nil {
-		log.Fatalf("%+v", err)
+		klog.Fatalf("%+v", err)
 	}
 	exit := make(<-chan struct{})
 	client.Start(exit)
 	*forceNamespaced = *forceNamespaced || "true" == os.Getenv("FORCENAMESPACED")
-	s := server.NewServer(*forceNamespaced, *micNamespace)
+	s := server.NewServer(*forceNamespaced, *micNamespace, *blockInstanceMetadata)
 	s.KubeClient = client
 	s.MetadataIP = *metadataIP
 	s.MetadataPort = *metadataPort
@@ -70,9 +90,14 @@ func main() {
 
 	// Health probe will always report success once its started. The contents
 	// will report "Active" once the iptables rules are set
-	probes.InitAndStart(*httpProbePort, &s.Initialized, logger)
+	probes.InitAndStart(*httpProbePort, &s.Initialized)
+
+	// Register and expose metrics views
+	if err = metrics.RegisterAndExport(*prometheusPort); err != nil {
+		klog.Fatalf("Could not register and export metrics: %+v", err)
+	}
 
 	if err := s.Run(); err != nil {
-		log.Fatalf("%s", err)
+		klog.Fatalf("%s", err)
 	}
 }

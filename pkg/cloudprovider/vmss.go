@@ -5,18 +5,20 @@ import (
 	"time"
 
 	"github.com/Azure/aad-pod-identity/pkg/config"
+	"github.com/Azure/aad-pod-identity/pkg/metrics"
 	"github.com/Azure/aad-pod-identity/pkg/stats"
 	"github.com/Azure/aad-pod-identity/version"
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-04-01/compute"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/adal"
 	"github.com/Azure/go-autorest/autorest/azure"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
 // VMSSClient is used to interact with Azure virtual machine scale sets.
 type VMSSClient struct {
-	client compute.VirtualMachineScaleSetsClient
+	client   compute.VirtualMachineScaleSetsClient
+	reporter *metrics.Reporter
 }
 
 // VMSSClientInt is the interface used by "cloudprovider" for interacting with Azure vmss
@@ -31,7 +33,7 @@ func NewVMSSClient(config config.AzureConfig, spt *adal.ServicePrincipalToken) (
 
 	azureEnv, err := azure.EnvironmentFromName(config.Cloud)
 	if err != nil {
-		glog.Errorf("Get cloud env error: %+v", err)
+		klog.Errorf("Get cloud env error: %+v", err)
 		return nil, err
 	}
 	client.BaseURI = azureEnv.ResourceManagerEndpoint
@@ -39,8 +41,15 @@ func NewVMSSClient(config config.AzureConfig, spt *adal.ServicePrincipalToken) (
 	client.PollingDelay = 5 * time.Second
 	client.AddToUserAgent(version.GetUserAgent("MIC", version.MICVersion))
 
+	reporter, err := metrics.NewReporter()
+	if err != nil {
+		klog.Errorf("New reporter error: %+v", err)
+		return nil, err
+	}
+
 	return &VMSSClient{
-		client: client,
+		client:   client,
+		reporter: reporter,
 	}, nil
 }
 
@@ -49,26 +58,30 @@ func NewVMSSClient(config config.AzureConfig, spt *adal.ServicePrincipalToken) (
 func (c *VMSSClient) CreateOrUpdate(rg string, vmssName string, vm compute.VirtualMachineScaleSet) error {
 	// Set the read-only property of extension to null.
 	//vm.Resources = nil
-
 	ctx := context.Background()
 	begin := time.Now()
+	var err error
+
+	defer func() {
+		if err != nil {
+			c.reporter.ReportCloudProviderOperationError(metrics.PutVmssOperationName)
+			return
+		}
+		c.reporter.ReportCloudProviderOperationDuration(metrics.PutVmssOperationName, time.Since(begin))
+	}()
+
 	future, err := c.client.CreateOrUpdate(ctx, rg, vmssName, vm)
 	if err != nil {
-		glog.Error(err)
+		klog.Error(err)
 		return err
 	}
 
 	err = future.WaitForCompletionRef(ctx, c.client.Client)
 	if err != nil {
-		glog.Error(err)
+		klog.Error(err)
 		return err
 	}
-
-	vm, err = future.Result(c.client)
-	if err != nil {
-		glog.Error(err)
-		return err
-	}
+	stats.UpdateCount(stats.TotalPutCalls, 1)
 	stats.Update(stats.CloudPut, time.Since(begin))
 	return nil
 }
@@ -76,13 +89,22 @@ func (c *VMSSClient) CreateOrUpdate(rg string, vmssName string, vm compute.Virtu
 // Get gets the passed in vmss.
 func (c *VMSSClient) Get(rgName string, vmssName string) (ret compute.VirtualMachineScaleSet, err error) {
 	ctx := context.Background()
-	beginGetTime := time.Now()
+	begin := time.Now()
+
+	defer func() {
+		if err != nil {
+			c.reporter.ReportCloudProviderOperationError(metrics.GetVmssOperationName)
+			return
+		}
+		c.reporter.ReportCloudProviderOperationDuration(metrics.GetVmssOperationName, time.Since(begin))
+	}()
 	vm, err := c.client.Get(ctx, rgName, vmssName)
 	if err != nil {
-		glog.Error(err)
+		klog.Error(err)
 		return vm, err
 	}
-	stats.Update(stats.CloudGet, time.Since(beginGetTime))
+	stats.UpdateCount(stats.TotalGetCalls, 1)
+	stats.Update(stats.CloudGet, time.Since(begin))
 	return vm, nil
 }
 
@@ -132,5 +154,8 @@ func (i *vmssIdentityInfo) AppendUserIdentity(id string) bool {
 }
 
 func (i *vmssIdentityInfo) GetUserIdentityList() []string {
+	if i.info.IdentityIds == nil {
+		return []string{}
+	}
 	return *i.info.IdentityIds
 }

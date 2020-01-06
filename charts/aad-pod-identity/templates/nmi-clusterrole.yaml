@@ -4,10 +4,7 @@ kind: ClusterRole
 metadata:
   name: {{ template "aad-pod-identity.nmi.fullname" . }}
   labels:
-    app.kubernetes.io/name: {{ template "aad-pod-identity.name" . }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
-    helm.sh/chart: {{ template "aad-pod-identity.chart" . }}
+    {{- include "aad-pod-identity.labels" . | nindent 4 }}
     app.kubernetes.io/component: nmi
 rules:
 - apiGroups: ["apiextensions.k8s.io"]
@@ -15,7 +12,7 @@ rules:
   verbs: ["get", "list"]
 - apiGroups: [""]
   resources: ["pods"]
-  verbs: ["get", "list"]
+  verbs: ["get", "list", "watch"]
 {{- if .Values.rbac.allowAccessToSecrets }}
 - apiGroups: [""]
   resources: ["secrets"]
@@ -23,8 +20,8 @@ rules:
 {{- end }}
 - apiGroups: ["aadpodidentity.k8s.io"]
   resources: ["azureidentitybindings", "azureidentities", "azurepodidentityexceptions"]
-  verbs: ["get", "list"]
+  verbs: ["get", "list", "watch"]
 - apiGroups: ["aadpodidentity.k8s.io"]
   resources: ["azureassignedidentities"]
-  verbs: ["get", "list"]
+  verbs: ["get", "list", "watch"]
 {{- end }}

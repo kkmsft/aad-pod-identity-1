@@ -4,9 +4,11 @@ import (
 	"encoding/base64"
 	"testing"
 
-	aadpodid "github.com/Azure/aad-pod-identity/pkg/apis/aadpodidentity/v1"
+	internalaadpodid "github.com/Azure/aad-pod-identity/pkg/apis/aadpodidentity"
+	auth "github.com/Azure/aad-pod-identity/pkg/auth"
 	"github.com/Azure/aad-pod-identity/pkg/k8s"
-	log "github.com/sirupsen/logrus"
+	"github.com/Azure/aad-pod-identity/pkg/metrics"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -14,6 +16,11 @@ import (
 
 func TestGetTokenForMatchingIDBySP(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset()
+	reporter, err := metrics.NewReporter()
+	if err != nil {
+		t.Fatalf("expected nil error, got: %+v", err)
+	}
+	auth.InitReporter(reporter)
 
 	secret := &v1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "clientSecret"}, Data: make(map[string][]byte)}
 	val, _ := base64.StdEncoding.DecodeString("YWJjZA==")
@@ -27,15 +34,14 @@ func TestGetTokenForMatchingIDBySP(t *testing.T) {
 		Namespace: "default",
 	}
 
-	podID := aadpodid.AzureIdentity{
-		Spec: aadpodid.AzureIdentitySpec{
-			Type:           aadpodid.ServicePrincipal,
+	podID := internalaadpodid.AzureIdentity{
+		Spec: internalaadpodid.AzureIdentitySpec{
+			Type:           internalaadpodid.ServicePrincipal,
 			TenantID:       "tid",
 			ClientID:       "aabc0000-a83v-9h4m-000j-2c0a66b0c1f9",
 			ClientPassword: secretRef,
 		},
 	}
-	podIDs := []aadpodid.AzureIdentity{podID}
-	logger := log.WithError(nil)
-	getTokenForMatchingID(kubeClient, logger, podID.Spec.ClientID, "https://management.azure.com/", podIDs)
+	podIDs := []internalaadpodid.AzureIdentity{podID}
+	getTokenForMatchingID(kubeClient, podID.Spec.ClientID, "https://management.azure.com/", podIDs)
 }

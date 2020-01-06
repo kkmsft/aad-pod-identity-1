@@ -1,3 +1,23 @@
+# v1.5.4
+
+### Features
+
+- Add block-instance-metadata flag ([#396](https://github.com/Azure/aad-pod-identity/pull/396))
+- Add metrics ([#429](https://github.com/Azure/aad-pod-identity/pull/429))
+- Adding support for whitelisting of user-defined managed identities ([#431](https://github.com/Azure/aad-pod-identity/pull/431))
+
+### Bug Fixes
+
+- Fix glog flag parse error in nmi ([#435](https://github.com/Azure/aad-pod-identity/pull/435))
+
+### Other Improvements
+
+- Add application/json header for all return paths ([#424](https://github.com/Azure/aad-pod-identity/pull/424))
+- Update golang used to build binaries ([#426](https://github.com/Azure/aad-pod-identity/pull/426))
+- Reduce log verbosity for debug log ([#433](https://github.com/Azure/aad-pod-identity/pull/433))
+- Move to latest Alpine 3.10.4 ([#446](https://github.com/Azure/aad-pod-identity/pull/446))
+- Validate resource param exists in request ([#450](https://github.com/Azure/aad-pod-identity/pull/450))
+
 # v1.5.3
 
 ### Bug Fixes
@@ -7,6 +27,7 @@
 - Clean up assigned identities if node not found ([#367](https://github.com/Azure/aad-pod-identity/pull/367))
 - Fixes to identity operations on VMSS ([#379](https://github.com/Azure/aad-pod-identity/pull/379))
 - Fix namespaced multiple binding/identity handling and verbose logs ([#388](https://github.com/Azure/aad-pod-identity/pull/388))
+- Fix panic issues while identity ids is nil ([#403](https://github.com/Azure/aad-pod-identity/pull/403))
 
 ### Other Improvements
 
@@ -15,6 +36,9 @@
 - Add user agent to kube-api calls ([#353](https://github.com/Azure/aad-pod-identity/pull/353))
 - Add resource and request limits ([#372](https://github.com/Azure/aad-pod-identity/pull/372))
 - Add user agent to ARM calls ([#387](https://github.com/Azure/aad-pod-identity/pull/387))
+- Scale and performance improvements ([#408](https://github.com/Azure/aad-pod-identity/pull/408))
+- Remove unused GET in CreateOrUpdate ([#411](https://github.com/Azure/aad-pod-identity/pull/411))
+- Remove deprecated API Version usages ([#416](https://github.com/Azure/aad-pod-identity/pull/416))
 
 # v1.5.2
 

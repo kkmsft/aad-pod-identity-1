@@ -8,20 +8,19 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog"
 
-	aadpodid "github.com/Azure/aad-pod-identity/pkg/apis/aadpodidentity/v1"
+	aadpodid "github.com/Azure/aad-pod-identity/pkg/apis/aadpodidentity"
 	crd "github.com/Azure/aad-pod-identity/pkg/crd"
-	inlog "github.com/Azure/aad-pod-identity/pkg/logger"
+	"github.com/Azure/aad-pod-identity/pkg/metrics"
 	"github.com/Azure/aad-pod-identity/version"
-	"github.com/golang/glog"
-	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	informersv1 "k8s.io/client-go/informers/core/v1"
+	"k8s.io/client-go/informers/internalinterfaces"
 )
 
 const (
@@ -49,12 +48,12 @@ type KubeClient struct {
 	ClientSet kubernetes.Interface
 	// Crd client used to access our CRD resources.
 	CrdClient   *crd.Client
-	PodInformer informersv1.PodInformer
-	log         inlog.Logger
+	PodInformer cache.SharedIndexInformer
+	reporter    *metrics.Reporter
 }
 
 // NewKubeClient new kubernetes api client
-func NewKubeClient(log inlog.Logger) (Client, error) {
+func NewKubeClient(nodeName string, scale bool) (Client, error) {
 	config, err := buildConfig()
 	if err != nil {
 		return nil, err
@@ -64,29 +63,41 @@ func NewKubeClient(log inlog.Logger) (Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	crdclient, err := crd.NewCRDClientLite(config, log)
+	crdclient, err := crd.NewCRDClientLite(config, nodeName, scale)
+	if err != nil {
+		return nil, err
+	}
+	reporter, err := metrics.NewReporter()
 	if err != nil {
 		return nil, err
 	}
 
-	informer := informers.NewSharedInformerFactory(clientset, 30*time.Second)
-	podInformer := informer.Core().V1().Pods()
+	podInformer := informersv1.NewFilteredPodInformer(clientset, v1.NamespaceAll, 10*time.Minute,
+		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+		NodeNameFilter(nodeName))
 
 	kubeClient := &KubeClient{
 		CrdClient:   crdclient,
 		ClientSet:   clientset,
 		PodInformer: podInformer,
-		log:         log,
+		reporter:    reporter,
 	}
 
 	return kubeClient, nil
 }
 
+func (c *KubeClient) Sync(exit <-chan struct{}) {
+	if !cache.WaitForCacheSync(exit, c.PodInformer.HasSynced) {
+		klog.Errorf("Pod cache could not be synchronized")
+	}
+	c.CrdClient.SyncCacheLite(exit)
+}
+
 // Start the corresponding starts
 func (c *KubeClient) Start(exit <-chan struct{}) {
-	go c.PodInformer.Informer().Run(exit)
+	go c.PodInformer.Run(exit)
 	c.CrdClient.StartLite(exit)
-	c.CrdClient.SyncCacheLite(exit)
+	c.Sync(exit)
 }
 
 func (c *KubeClient) getReplicasetName(pod v1.Pod) string {
@@ -96,6 +107,18 @@ func (c *KubeClient) getReplicasetName(pod v1.Pod) string {
 		}
 	}
 	return ""
+}
+
+// NodeNameFilter will tweak the options to include the node name as field
+// selector.
+func NodeNameFilter(nodeName string) internalinterfaces.TweakListOptionsFunc {
+	return func(l *metav1.ListOptions) {
+		if l == nil {
+			l = &metav1.ListOptions{}
+		}
+		l.FieldSelector = l.FieldSelector + "spec.nodeName=" + nodeName
+		return
+	}
 }
 
 // GetPodInfo get pod ns,name from apiserver
@@ -123,21 +146,22 @@ func isPhaseValid(p v1.PodPhase) bool {
 }
 
 func (c *KubeClient) getPodList(podip string) ([]*v1.Pod, error) {
-	list, err := c.PodInformer.Lister().List(labels.Everything())
-	if err != nil {
-		glog.Error(err)
-		return nil, err
-	}
-
 	var podList []*v1.Pod
-	for _, pod := range list {
+	list := c.PodInformer.GetStore().List()
+	for _, o := range list {
+		pod, ok := o.(*v1.Pod)
+		if !ok {
+			err := fmt.Errorf("could not cast %T to %s", pod, "v1.Pod")
+			klog.Error(err)
+			return nil, err
+		}
 		if pod.Status.PodIP == podip && isPhaseValid(pod.Status.Phase) {
 			podList = append(podList, pod)
 		}
 	}
 	if len(podList) == 0 {
 		err := fmt.Errorf("pod list empty")
-		glog.Error(err)
+		klog.Error(err)
 		return nil, err
 	}
 	return podList, nil
@@ -154,11 +178,13 @@ func (c *KubeClient) getPodListRetry(podip string, retries int, sleeptime time.D
 		if err == nil {
 			return podList, nil
 		}
+		c.reporter.ReportKubernetesAPIOperationError(metrics.GetPodListOperationName)
+
 		if i >= retries {
 			break
 		}
 		i++
-		log.Warningf("List pod error: %+v. Retrying, attempt number: %d", err, i)
+		klog.Warningf("List pod error: %+v. Retrying, attempt number: %d", err, i)
 		time.Sleep(sleeptime * time.Millisecond)
 	}
 	// We reach here only if there is an error and we have exhausted all retries.
@@ -197,6 +223,7 @@ func (c *KubeClient) ListPodIdentityExceptions(ns string) (*[]aadpodid.AzurePodI
 func (c *KubeClient) GetSecret(secretRef *v1.SecretReference) (*v1.Secret, error) {
 	secret, err := c.ClientSet.CoreV1().Secrets(secretRef.Namespace).Get(secretRef.Name, metav1.GetOptions{})
 	if err != nil {
+		c.reporter.ReportKubernetesAPIOperationError(metrics.GetSecretOperationName)
 		return nil, err
 	}
 	return secret, nil
@@ -220,4 +247,13 @@ func buildConfig() (*rest.Config, error) {
 	}
 
 	return rest.InClusterConfig()
+}
+
+// recordError records the error in appropriate metric
+func recordError(reporter *metrics.Reporter, operation string) {
+	if reporter != nil {
+		reporter.ReportOperation(
+			operation,
+			metrics.KubernetesAPIOperationsErrorsCountM.M(1))
+	}
 }

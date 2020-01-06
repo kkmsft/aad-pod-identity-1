@@ -1,8 +1,23 @@
-package v1
+package aadpodidentity
 
 import (
 	api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+type EventType int
+
+const (
+	PodCreated      EventType = 0
+	PodDeleted      EventType = 1
+	PodUpdated      EventType = 2
+	IdentityCreated EventType = 3
+	IdentityDeleted EventType = 4
+	IdentityUpdated EventType = 5
+	BindingCreated  EventType = 6
+	BindingDeleted  EventType = 7
+	BindingUpdated  EventType = 8
+	Exit            EventType = 9
 )
 
 const (
@@ -112,27 +127,27 @@ const (
 type AzureIdentitySpec struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	// UserAssignedMSI or Service Principal
-	Type IdentityType `json:"Type"`
+	Type IdentityType `json:"type"`
 
 	// User assigned MSI resource id.
-	ResourceID string `json:"ResourceID"`
+	ResourceID string `json:"resourceid"`
 	//Both User Assigned MSI and SP can use this field.
-	ClientID string `json:"ClientID"`
+	ClientID string `json:"clientid"`
 
 	//Used for service principal
-	ClientPassword api.SecretReference `json:"ClientPassword"`
+	ClientPassword api.SecretReference `json:"clientpassword"`
 	// Service principal tenant id.
-	TenantID string `json:"TenantID"`
+	TenantID string `json:"tenantid"`
 	// For service principal. Option param for specifying the  AD details.
-	ADResourceID string `json:"ADResourceid"`
-	ADEndpoint   string `json:"ADEndpoint"`
+	ADResourceID string `json:"adresourceid"`
+	ADEndpoint   string `json:"adendpoint"`
 
-	Replicas *int32 `json:"Replicas"`
+	Replicas *int32 `json:"replicas"`
 }
 
 type AzureIdentityStatus struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	AvailableReplicas int32 `json:"AvailableReplicas"`
+	AvailableReplicas int32 `json:"availableReplicas"`
 }
 
 /*** AzureIdentityBinding ***/
@@ -166,15 +181,15 @@ const (
 // and the identities present..
 type AzureIdentityBindingSpec struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	AzureIdentity     string `json:"AzureIdentity"`
-	Selector          string `json:"Selector"`
+	AzureIdentity     string `json:"azureidentity"`
+	Selector          string `json:"selector"`
 	// Weight is used to figure out which of the matching identities would be selected.
-	Weight int `json:"Weight"`
+	Weight int `json:"weight"`
 }
 
 type AzureIdentityBindingStatus struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	AvailableReplicas int32 `json:"AvailableReplicas"`
+	AvailableReplicas int32 `json:"availableReplicas"`
 }
 
 /*** AzureAssignedIdentitySpec ***/
@@ -182,20 +197,20 @@ type AzureIdentityBindingStatus struct {
 //AzureAssignedIdentitySpec has the contents of Azure identity<->POD
 type AzureAssignedIdentitySpec struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	AzureIdentityRef  *AzureIdentity        `json:"AzureIdentityRef"`
-	AzureBindingRef   *AzureIdentityBinding `json:"AzureBindingRef"`
-	Pod               string                `json:"Pod"`
-	PodNamespace      string                `json:"PodNamespace"`
-	NodeName          string                `json:"NodeName"`
+	AzureIdentityRef  *AzureIdentity        `json:"azureidentityref"`
+	AzureBindingRef   *AzureIdentityBinding `json:"azurebindingref"`
+	Pod               string                `json:"pod"`
+	PodNamespace      string                `json:"podnamespace"`
+	NodeName          string                `json:"nodename"`
 
-	Replicas *int32 `json:"Replicas"`
+	Replicas *int32 `json:"replicas"`
 }
 
 // AzureAssignedIdentityStatus has the replica status of the resouce.
 type AzureAssignedIdentityStatus struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	Status            string `json:"status"`
-	AvailableReplicas int32  `json:"AvailableReplicas"`
+	AvailableReplicas int32  `json:"availableReplicas"`
 }
 
 // AzurePodIdentityExceptionSpec matches pods with the selector defined.
@@ -203,11 +218,11 @@ type AzureAssignedIdentityStatus struct {
 // proxy the request and send response back without any validation.
 type AzurePodIdentityExceptionSpec struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	PodLabels         map[string]string `json:"PodLabels"`
+	PodLabels         map[string]string `json:"podLabels"`
 }
 
 // AzurePodIdentityExceptionStatus ...
 type AzurePodIdentityExceptionStatus struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Status            string `json:"Status"`
+	Status            string `json:"status"`
 }

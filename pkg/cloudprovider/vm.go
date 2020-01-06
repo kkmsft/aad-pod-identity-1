@@ -5,30 +5,35 @@ import (
 	"time"
 
 	"github.com/Azure/aad-pod-identity/pkg/config"
+	"github.com/Azure/aad-pod-identity/pkg/metrics"
 	"github.com/Azure/aad-pod-identity/pkg/stats"
 	"github.com/Azure/aad-pod-identity/version"
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-04-01/compute"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/adal"
 	"github.com/Azure/go-autorest/autorest/azure"
-	"github.com/golang/glog"
+	"k8s.io/klog"
 )
 
+// VMClient client for VirtualMachines
 type VMClient struct {
-	client compute.VirtualMachinesClient
+	client   compute.VirtualMachinesClient
+	reporter *metrics.Reporter
 }
 
+// VMClientInt is the interface used by "cloudprovider" for interacting with Azure vmas
 type VMClientInt interface {
 	CreateOrUpdate(rg string, nodeName string, vm compute.VirtualMachine) error
 	Get(rgName string, nodeName string) (compute.VirtualMachine, error)
 }
 
+// NewVirtualMachinesClient creates a new vm client.
 func NewVirtualMachinesClient(config config.AzureConfig, spt *adal.ServicePrincipalToken) (c *VMClient, e error) {
 	client := compute.NewVirtualMachinesClient(config.SubscriptionID)
 
 	azureEnv, err := azure.EnvironmentFromName(config.Cloud)
 	if err != nil {
-		glog.Errorf("Get cloud env error: %+v", err)
+		klog.Errorf("Get cloud env error: %+v", err)
 		return nil, err
 	}
 	client.BaseURI = azureEnv.ResourceManagerEndpoint
@@ -36,46 +41,72 @@ func NewVirtualMachinesClient(config config.AzureConfig, spt *adal.ServicePrinci
 	client.PollingDelay = 5 * time.Second
 	client.AddToUserAgent(version.GetUserAgent("MIC", version.MICVersion))
 
+	reporter, err := metrics.NewReporter()
+	if err != nil {
+		klog.Errorf("New reporter error: %+v", err)
+		return nil, err
+	}
+
 	return &VMClient{
-		client: client,
+		client:   client,
+		reporter: reporter,
 	}, nil
 }
 
+// CreateOrUpdate creates a new vm, or if the vm already exists it updates the existing one.
+// This is used by "cloudprovider" to *update* add/remove identities from an already existing vm.
 func (c *VMClient) CreateOrUpdate(rg string, nodeName string, vm compute.VirtualMachine) error {
 	// Set the read-only property of extension to null.
 	vm.Resources = nil
 	ctx := context.Background()
 	begin := time.Now()
+	var err error
+
+	defer func() {
+		if err != nil {
+			c.reporter.ReportCloudProviderOperationError(metrics.PutVMOperationName)
+			return
+		}
+		c.reporter.ReportCloudProviderOperationDuration(metrics.PutVMOperationName, time.Since(begin))
+	}()
+
 	future, err := c.client.CreateOrUpdate(ctx, rg, nodeName, vm)
 	if err != nil {
-		glog.Error(err)
+		klog.Error(err)
 		return err
 	}
 
 	err = future.WaitForCompletionRef(ctx, c.client.Client)
 	if err != nil {
-		glog.Error(err)
+		klog.Error(err)
 		return err
 	}
-
-	vm, err = future.Result(c.client)
-	if err != nil {
-		glog.Error(err)
-		return err
-	}
+	stats.UpdateCount(stats.TotalPutCalls, 1)
 	stats.Update(stats.CloudPut, time.Since(begin))
 	return nil
 }
 
+// Get gets the passed in vm.
 func (c *VMClient) Get(rgName string, nodeName string) (compute.VirtualMachine, error) {
 	ctx := context.Background()
-	beginGetTime := time.Now()
+	begin := time.Now()
+	var err error
+
+	defer func() {
+		if err != nil {
+			c.reporter.ReportCloudProviderOperationError(metrics.GetVMOperationName)
+			return
+		}
+		c.reporter.ReportCloudProviderOperationDuration(metrics.GetVMOperationName, time.Since(begin))
+	}()
+
 	vm, err := c.client.Get(ctx, rgName, nodeName, "")
 	if err != nil {
-		glog.Error(err)
+		klog.Error(err)
 		return vm, err
 	}
-	stats.Update(stats.CloudGet, time.Since(beginGetTime))
+	stats.UpdateCount(stats.TotalGetCalls, 1)
+	stats.Update(stats.CloudGet, time.Since(begin))
 	return vm, nil
 }
 
@@ -124,5 +155,8 @@ func (i *vmIdentityInfo) AppendUserIdentity(id string) bool {
 }
 
 func (i *vmIdentityInfo) GetUserIdentityList() []string {
+	if i.info.IdentityIds == nil {
+		return []string{}
+	}
 	return *i.info.IdentityIds
 }

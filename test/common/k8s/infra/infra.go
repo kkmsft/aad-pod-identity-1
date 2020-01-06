@@ -11,7 +11,7 @@ import (
 )
 
 // CreateInfra will deploy all the infrastructure components (nmi and mic) on a Kubernetes cluster
-func CreateInfra(namespace, registry, nmiVersion, micVersion, templateOutputPath string, old bool) error {
+func CreateInfra(namespace, registry, nmiVersion, micVersion, templateOutputPath string, old, enableScaleFeatures bool, immutableUserMSIs string) error {
 	var err error
 	var t *template.Template
 	if !old {
@@ -37,12 +37,14 @@ func CreateInfra(namespace, registry, nmiVersion, micVersion, templateOutputPath
 	nmiArg = nmiVersion == "1.4"
 
 	deployData := struct {
-		Namespace  string
-		Registry   string
-		NMIVersion string
-		MICVersion string
-		MICArg     bool
-		NMIArg     bool
+		Namespace           string
+		Registry            string
+		NMIVersion          string
+		MICVersion          string
+		MICArg              bool
+		NMIArg              bool
+		EnableScaleFeatures bool
+		ImmutableUserMSIs   string
 	}{
 		namespace,
 		registry,
@@ -50,6 +52,8 @@ func CreateInfra(namespace, registry, nmiVersion, micVersion, templateOutputPath
 		micVersion,
 		micArg,
 		nmiArg,
+		enableScaleFeatures,
+		immutableUserMSIs,
 	}
 	if err := t.Execute(deployFile, deployData); err != nil {
 		return errors.Wrap(err, "Failed to create a deployment file from deployment-rbac.yaml")

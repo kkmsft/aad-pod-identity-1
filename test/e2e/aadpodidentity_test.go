@@ -39,6 +39,7 @@ const (
 	keyvaultIdentity  = "keyvault-identity"
 	identityValidator = "identity-validator"
 	nmiDaemonSet      = "nmi"
+	immutableIdentity = "immutable-identity"
 )
 
 var (
@@ -60,7 +61,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	cfg = *c
 	fmt.Printf("System MSI enabled: %v\n", cfg.SystemMSICluster)
-	setupInfra(cfg.Registry, cfg.NMIVersion, cfg.MICVersion)
+	setupInfra(cfg.Registry, cfg.NMIVersion, cfg.MICVersion, cfg.EnableScaleFeatures, cfg.ImmutableUserMSIs)
 })
 
 var _ = AfterSuite(func() {
@@ -295,52 +296,6 @@ var _ = Describe("Kubernetes cluster using aad-pod-identity", func() {
 		}
 	})
 
-	// It("should re-schedule the identity validator and its identity to a new node after powering down and restarting the node containing them", func() {
-	// 	setUpIdentityAndDeployment(keyvaultIdentity, "")
-
-	// 	identityClientID, err := azure.GetIdentityClientID(cfg.ResourceGroup, keyvaultIdentity)
-	// 	Expect(err).NotTo(HaveOccurred())
-	// 	Expect(identityClientID).NotTo(Equal(""))
-
-	// 	podName, err := pod.GetNameByPrefix(identityValidator)
-	// 	Expect(err).NotTo(HaveOccurred())
-	// 	Expect(podName).NotTo(Equal(""))
-
-	// 	// Get the name of the node to drain
-	// 	nodeName, err := pod.GetNodeName(podName)
-	// 	Expect(err).NotTo(HaveOccurred())
-	// 	Expect(nodeName).NotTo(Equal(""))
-
-	// 	azure.StopKubelet(cfg.ResourceGroup, nodeName)
-	// 	azure.StopVM(cfg.ResourceGroup, nodeName)
-
-	// 	// 2 AzureAssignedIdentity, one from the powered down node, in Unknown state,
-	// 	// and one from the other node, in Running state
-	// 	ok, err := azureassignedidentity.WaitOnLengthMatched(2)
-	// 	Expect(err).NotTo(HaveOccurred())
-	// 	Expect(ok).To(Equal(true))
-
-	// 	// Get the new pod name
-	// 	podName, err = pod.GetNameByPrefix(identityValidator)
-	// 	Expect(err).NotTo(HaveOccurred())
-	// 	Expect(podName).NotTo(Equal(""))
-
-	// 	azureAssignedIdentity, err := azureassignedidentity.GetByPrefix(identityValidator)
-	// 	validateAzureAssignedIdentity(azureAssignedIdentity, keyvaultIdentity)
-
-	// 	// Start the VM again to ensure that the old AzureAssignedIdentity is deleted
-	// 	azure.StartVM(cfg.ResourceGroup, nodeName)
-	// 	azure.StartKubelet(cfg.ResourceGroup, nodeName)
-
-	// 	ok, err = azureassignedidentity.WaitOnLengthMatched(1)
-	// 	Expect(ok).To(Equal(true))
-	// 	Expect(err).NotTo(HaveOccurred())
-
-	// 	// Final validation to ensure that everything is functioning after restarting the node
-	// 	azureAssignedIdentity, err = azureassignedidentity.GetByPrefix(identityValidator)
-	// 	validateAzureAssignedIdentity(azureAssignedIdentity, keyvaultIdentity)
-	// })
-
 	It("should not alter the user assigned identity on VM after AAD pod identity is created and deleted", func() {
 		azureIdentityResource := "/subscriptions/%s/resourceGroups/%s/providers/Microsoft.ManagedIdentity/userAssignedIdentities/%s"
 		clusterIdentityResource := fmt.Sprintf(azureIdentityResource, cfg.SubscriptionID, cfg.ResourceGroup, clusterIdentity)
@@ -353,6 +308,10 @@ var _ = Describe("Kubernetes cluster using aad-pod-identity", func() {
 		enableUserAssignedIdentityOnCluster(nodeList, clusterIdentity)
 
 		setUpIdentityAndDeployment(keyvaultIdentity, "", "1")
+
+		ok, err := azureassignedidentity.WaitOnLengthMatched(1)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ok).To(Equal(true))
 
 		podName, err := pod.GetNameByPrefix(identityValidator)
 		Expect(err).NotTo(HaveOccurred())
@@ -374,7 +333,7 @@ var _ = Describe("Kubernetes cluster using aad-pod-identity", func() {
 		Expect(len(userAssignedIdentities)).To(Equal(2))
 
 		// Check if both VM identity and pod identity exist in the node
-		_, ok := (userAssignedIdentities)[clusterIdentityResource]
+		_, ok = (userAssignedIdentities)[clusterIdentityResource]
 		Expect(ok).To(Equal(true))
 		_, ok = (userAssignedIdentities)[keyvaultIdentityResource]
 		Expect(ok).To(Equal(true))
@@ -403,71 +362,6 @@ var _ = Describe("Kubernetes cluster using aad-pod-identity", func() {
 
 		removeUserAssignedIdentityFromCluster(nodeList, clusterIdentity)
 	})
-
-	// Require issue #93 to be fixed in order for this test to pass
-	// It("should not alter the user assigned identity on VM after assigning and removing the same identity to the pod", func() {
-	// 	azureIdentityResource := "/subscriptions/%s/resourceGroups/aad-pod-identity-e2e/providers/Microsoft.ManagedIdentity/userAssignedIdentities/%s"
-	// 	clusterIdentityResource := fmt.Sprintf(azureIdentityResource, cfg.SubscriptionID, clusterIdentity)
-
-	// 	// Assign user assigned identity to every node
-	// 	nodeList, err := node.GetAll()
-	// 	Expect(err).NotTo(HaveOccurred())
-
-	// 	// Re-deploy aad pod identity infra to allow MIC to register the correct VM level identity
-	// 	cmd := exec.Command("kubectl", "delete", "-f", "../../deploy/infra/deployment-rbac.yaml", "--ignore-not-found")
-	// 	_, err = cmd.CombinedOutput()
-	// 	Expect(err).NotTo(HaveOccurred())
-
-	// 	enableUserAssignedIdentityOnCluster(nodeList, clusterIdentity)
-
-	// 	cmd = exec.Command("kubectl", "apply", "-f", "../../deploy/infra/deployment-rbac.yaml")
-	// 	_, err = cmd.CombinedOutput()
-	// 	Expect(err).NotTo(HaveOccurred())
-
-	// 	// Assign the same identity to identity validator pod
-	// 	setUpIdentityAndDeployment(clusterIdentity, "")
-
-	// 	podName, err := pod.GetNameByPrefix(identityValidator)
-	// 	Expect(err).NotTo(HaveOccurred())
-	// 	Expect(podName).NotTo(Equal(""))
-
-	// 	// Get the name of the node to assign the identity to
-	// 	nodeName, err := pod.GetNodeName(podName)
-	// 	Expect(err).NotTo(HaveOccurred())
-	// 	Expect(nodeName).NotTo(Equal(""))
-
-	// 	// Make sure that there is only one identity assigned to the VM
-	// 	userAssignedIdentities, err := azure.GetUserAssignedIdentities(cfg.ResourceGroup, nodeName)
-	// 	Expect(err).NotTo(HaveOccurred())
-	// 	Expect(len(*userAssignedIdentities)).To(Equal(1))
-
-	// 	_, ok := (*userAssignedIdentities)[clusterIdentityResource]
-	// 	Expect(ok).To(Equal(true))
-
-	// 	azureAssignedIdentity, err := azureassignedidentity.GetByPrefix(identityValidator)
-	// 	Expect(err).NotTo(HaveOccurred())
-	// 	validateAzureAssignedIdentity(azureAssignedIdentity, clusterIdentity)
-
-	// 	// Delete pod identity to verify that the VM identity did not get deleted
-	// 	waitForDeployDeletion(identityValidator)
-	// 	cmd = exec.Command("kubectl", "delete", "AzureIdentity,AzureIdentityBinding,AzureAssignedIdentity", "--all")
-	// 	util.PrintCommand(cmd)
-	// 	_, err = cmd.CombinedOutput()
-	// 	Expect(err).NotTo(HaveOccurred())
-
-	// 	ok, err = azureassignedidentity.WaitOnLengthMatched(0)
-	// 	Expect(err).NotTo(HaveOccurred())
-	// 	Expect(ok).To(Equal(true))
-
-	// 	userAssignedIdentities, err = azure.GetUserAssignedIdentities(cfg.ResourceGroup, nodeName)
-	// 	Expect(err).NotTo(HaveOccurred())
-	// 	Expect(len(*userAssignedIdentities)).To(Equal(1))
-
-	// 	_, ok = (*userAssignedIdentities)[clusterIdentityResource]
-	// 	Expect(ok).To(Equal(true))
-
-	// 	removeUserAssignedIdentityFromCluster(nodeList, clusterIdentity)
-	// })
 
 	It("should cleanup iptable rules after deleting aad-pod-identity", func() {
 		// delete the aad-pod-identity deployment
@@ -498,7 +392,7 @@ var _ = Describe("Kubernetes cluster using aad-pod-identity", func() {
 		}
 
 		// reset the infra to previous state
-		setupInfra(cfg.Registry, cfg.NMIVersion, cfg.MICVersion)
+		setupInfra(cfg.Registry, cfg.NMIVersion, cfg.MICVersion, cfg.EnableScaleFeatures, cfg.ImmutableUserMSIs)
 	})
 
 	It("should not alter the system assigned identity after creating and deleting pod identity", func() {
@@ -594,7 +488,7 @@ var _ = Describe("Kubernetes cluster using aad-pod-identity", func() {
 		Expect(ok).To(Equal(true))
 
 		// setup mic and nmi with old releases
-		setupInfraOld("mcr.microsoft.com/k8s/aad-pod-identity", "1.4", "1.3")
+		setupInfraOld("mcr.microsoft.com/k8s/aad-pod-identity", "1.4", "1.3", "")
 
 		setUpIdentityAndDeployment(keyvaultIdentity, "", "1")
 
@@ -603,7 +497,7 @@ var _ = Describe("Kubernetes cluster using aad-pod-identity", func() {
 		Expect(ok).To(Equal(true))
 
 		// update the infra to use latest mic and nmi images
-		setupInfra(cfg.Registry, cfg.NMIVersion, cfg.MICVersion)
+		setupInfra(cfg.Registry, cfg.NMIVersion, cfg.MICVersion, cfg.EnableScaleFeatures, cfg.ImmutableUserMSIs)
 
 		ok, err = daemonset.WaitOnReady(nmiDaemonSet)
 		Expect(err).NotTo(HaveOccurred())
@@ -632,29 +526,11 @@ var _ = Describe("Kubernetes cluster using aad-pod-identity", func() {
 		nodeList, err := node.GetAll()
 		Expect(err).NotTo(HaveOccurred())
 
-		vmssNodes := make(map[string][]node.Node)
-		for _, n := range nodeList.Nodes {
-			r, _ := cloudprovider.ParseResourceID(n.Spec.ProviderID)
-			if r.ResourceType == cloudprovider.VMSSResourceType {
-				ls := vmssNodes[r.ResourceName]
-				vmssNodes[r.ResourceName] = append(ls, n)
-			}
-		}
-
-		var vmssID string
-		for id, ls := range vmssNodes {
-			if len(ls) > 1 {
-				vmssID = id
-				break
-			}
-		}
-
+		vmss, vmssID := GetVMSS(nodeList)
 		if vmssID == "" {
 			Skip("Skipping test since there is no vmss with more than 1 node")
 			return
 		}
-
-		vmss := vmssNodes[vmssID]
 
 		setUpIdentityAndDeployment(keyvaultIdentity, "", "1", func(d *infra.IdentityValidatorTemplateData) {
 			d.NodeName = vmss[0].Name
@@ -690,6 +566,45 @@ var _ = Describe("Kubernetes cluster using aad-pod-identity", func() {
 		exists, err = azure.UserIdentityAssignedToVMSS(cfg.ResourceGroup, vmssID, keyvaultIdentity)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(exists).To(Equal(true))
+	})
+
+	It("should not delete the Immutable Identity from vmss when the deployment is deleted", func() {
+		nodeList, err := node.GetAll()
+		Expect(err).NotTo(HaveOccurred())
+
+		vmss, vmssID := GetVMSS(nodeList)
+		if vmssID == "" {
+			Skip("Skipping test since there is no vmss with more than 1 node")
+			return
+		}
+
+		// Explicitly assign identity to the underlying VMSS:
+		enableUserAssignedIdentityOnCluster(nodeList, immutableIdentity)
+
+		setUpIdentityAndDeployment(immutableIdentity, "", "1", func(d *infra.IdentityValidatorTemplateData) {
+			d.NodeName = vmss[0].Name
+		})
+
+		ok, err := azureassignedidentity.WaitOnLengthMatched(1)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ok).To(Equal(true))
+
+		azureAssignedIdentity, err := azureassignedidentity.GetByPrefix(identityValidator)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Ensure that the identity validator is able to get the token
+		validateAzureAssignedIdentity(azureAssignedIdentity, immutableIdentity)
+
+		waitForDeployDeletion(identityValidator)
+
+		ok, err = azureassignedidentity.WaitOnLengthMatched(0)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ok).To(Equal(true))
+
+		exists, err := azure.UserIdentityAssignedToVMSS(cfg.ResourceGroup, vmssID, immutableIdentity)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exists).To(Equal(true))
+
 	})
 
 	It("should pass liveness probe test", func() {
@@ -944,6 +859,29 @@ var _ = Describe("Kubernetes cluster using aad-pod-identity", func() {
 	})
 })
 
+func GetVMSS(nodeList *node.List) ([]node.Node, string) {
+	vmssNodes := make(map[string][]node.Node)
+	for _, n := range nodeList.Nodes {
+		r, _ := cloudprovider.ParseResourceID(n.Spec.ProviderID)
+		if r.ResourceType == cloudprovider.VMSSResourceType {
+			ls := vmssNodes[r.ResourceName]
+			vmssNodes[r.ResourceName] = append(ls, n)
+		}
+	}
+	var vmssID string
+	for id, ls := range vmssNodes {
+		if len(ls) > 1 {
+			vmssID = id
+			break
+		}
+	}
+	if vmssID == "" {
+		return nil, ""
+	}
+	vmss := vmssNodes[vmssID]
+	return vmss, vmssID
+}
+
 func runValidatorTest(iterations int) {
 	defer GinkgoRecover()
 	replicas := "1"
@@ -1165,17 +1103,17 @@ func checkInfra() {
 }
 
 // setupInfra creates the crds, mic, nmi and blocks until iptable entries exist
-func setupInfraOld(registry, nmiVersion, micVersion string) {
+func setupInfraOld(registry, nmiVersion, micVersion string, immutableUserMSIs string) {
 	// Install CRDs and deploy MIC and NMI
-	err := infra.CreateInfra("default", registry, nmiVersion, micVersion, templateOutputPath, true)
+	err := infra.CreateInfra("default", registry, nmiVersion, micVersion, templateOutputPath, true, false, immutableUserMSIs)
 	Expect(err).NotTo(HaveOccurred())
 	checkInfra()
 }
 
 // setupInfra creates the crds, mic, nmi and blocks until iptable entries exist
-func setupInfra(registry, nmiVersion, micVersion string) {
+func setupInfra(registry, nmiVersion, micVersion string, enableScaleFeatures bool, immutableUserMSIs string) {
 	// Install CRDs and deploy MIC and NMI
-	err := infra.CreateInfra("default", registry, nmiVersion, micVersion, templateOutputPath, false)
+	err := infra.CreateInfra("default", registry, nmiVersion, micVersion, templateOutputPath, false, enableScaleFeatures, immutableUserMSIs)
 	Expect(err).NotTo(HaveOccurred())
 	checkInfra()
 }
@@ -1243,15 +1181,13 @@ func validateAzureAssignedIdentity(azureAssignedIdentity aadpodid.AzureAssignedI
 	Expect(azureAssignedIdentity.Spec.AzureIdentityRef.ObjectMeta.Name).To(Equal(identityName))
 	Expect(azureAssignedIdentity.Spec.AzureIdentityRef.ObjectMeta.Namespace).To(Equal("default"))
 
-	if strings.HasPrefix(identityName, keyvaultIdentity) {
-		cmdOutput, err := validateUserAssignedIdentityOnPod(podName, identityClientID)
-		Expect(errors.Wrap(err, string(cmdOutput))).NotTo(HaveOccurred())
-	} else if strings.HasPrefix(identityName, clusterIdentity) {
+	if strings.HasPrefix(identityName, clusterIdentity) {
 		cmdOutput, err := validateClusterWideUserAssignedIdentity(podName, identityClientID)
 		Expect(errors.Wrap(err, string(cmdOutput))).NotTo(HaveOccurred())
 	} else {
-		err := errors.Errorf("Invalid identity name: %s", identityName)
-		Expect(err).NotTo(HaveOccurred())
+		// validates user assigned identity - this includes keyvault identities and immutable identities
+		cmdOutput, err := validateUserAssignedIdentityOnPod(podName, identityClientID)
+		Expect(errors.Wrap(err, string(cmdOutput))).NotTo(HaveOccurred())
 	}
 
 	fmt.Printf("# %s validated!\n", identityName)
