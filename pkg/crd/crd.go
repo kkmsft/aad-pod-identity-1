@@ -150,7 +150,7 @@ func newRestClient(config *rest.Config) (r *rest.RESTClient, err error) {
 		&aadpodv1.AzurePodIdentityException{},
 		&aadpodv1.AzurePodIdentityExceptionList{},
 	)
-	crdconfig.NegotiatedSerializer = serializer.DirectCodecFactory{
+	crdconfig.NegotiatedSerializer = serializer.WithoutConversionCodecFactory{
 		CodecFactory: serializer.NewCodecFactory(s)}
 
 	//Client interacting with our CRDs
