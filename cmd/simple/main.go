@@ -7,11 +7,11 @@ import (
 	"github.com/Azure/aad-pod-identity/pkg/mic"
 	"github.com/Azure/aad-pod-identity/version"
 
-	aadpodid "github.com/Azure/aad-pod-identity/pkg/apis/aadpodidentity/v1"
+	aadpodid "github.com/Azure/aad-pod-identity/pkg/apis/aadpodidentity"
 	"github.com/Azure/aad-pod-identity/pkg/crd"
-	"github.com/golang/glog"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog"
 )
 
 var (
@@ -25,7 +25,7 @@ var (
 )
 
 func main() {
-	defer glog.Flush()
+	defer klog.Flush()
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to the kube config")
 
 	flag.Set("logtostderr", "true")
@@ -36,25 +36,24 @@ func main() {
 	if versionInfo {
 		version.PrintVersionAndExit()
 	}
-	glog.Infof("Starting mic process. Version: %v. Build date: %v", version.MICVersion, version.BuildDate)
+	klog.Infof("Starting mic process. Version: %v. Build date: %v", version.MICVersion, version.BuildDate)
 	if cloudconfig == "" {
-		glog.Warningf("--cloudconfig not passed will use aadpodidentity-admin-secret")
+		klog.Warningf("--cloudconfig not passed will use aadpodidentity-admin-secret")
 	}
 	if kubeconfig == "" {
-		glog.Warningf("--kubeconfig not passed will use InClusterConfig")
+		klog.Warningf("--kubeconfig not passed will use InClusterConfig")
 	}
 
-	glog.Infof("kubeconfig (%s) cloudconfig (%s)", kubeconfig, cloudconfig)
+	klog.Infof("kubeconfig (%s) cloudconfig (%s)", kubeconfig, cloudconfig)
 	config, err := buildConfig(kubeconfig)
 	if err != nil {
-		glog.Fatalf("Could not read config properly. Check the k8s config file, %+v", err)
+		klog.Fatalf("Could not read config properly. Check the k8s config file, %+v", err)
 	}
 
 	eventCh := make(chan aadpodid.EventType, 100)
-	log := mic.Log{}
-	crdClient, err := crd.NewCRDClient(config, eventCh, log)
+	crdClient, err := crd.NewCRDClient(config, eventCh)
 	if err != nil {
-		glog.Fatalf("%+v", err)
+		klog.Fatalf("%+v", err)
 	}
 
 	// Starts the leader election loop
@@ -64,25 +63,25 @@ func main() {
 
 	bindings, err := crdClient.ListBindings()
 	if err != nil {
-		glog.Fatalf("Could not get the bindings: %+v", err)
+		klog.Fatalf("Could not get the bindings: %+v", err)
 	}
 
 	for _, v := range *bindings {
 		//log.Infof("\n=========>")
-		log.Infof("\n%s", v.Spec.Selector)
+		klog.Infof("\n%s", v.Spec.Selector)
 		//log.Infof("\n<=========>")
 	}
 
 	assignedIDs, err := crdClient.ListAssignedIDs()
 	if err != nil {
-		glog.Fatalf("Could not get assigned ID")
+		klog.Fatalf("Could not get assigned ID")
 	}
 
 	for _, a := range *assignedIDs {
-		log.Infof("\n%s\n", a.Status.Status)
+		klog.Infof("\n%s\n", a.Status.Status)
 	}
 
-	log.Info("Done !")
+	klog.Info("Done !")
 }
 
 // Create the client config. Use kubeconfig if given, otherwise assume in-cluster.
